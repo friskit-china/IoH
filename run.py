@@ -1,76 +1,89 @@
-import os
-import smbus2
 from easydict import EasyDict as edict
 import argparse
-from modules import BME280, SSD1306
-import time
+from modules import BME280, SSD1306, Metering
 import threading
 import signal
 import board
 import busio
-from PIL import ImageFont, Image, ImageDraw
+import logging
 
+import time
+import os
+
+
+def metering_publish_worker(_g):
+
+    loop_sleep_time = _g.opt.iot_metering_publish_interval_sec
+
+
+    metering_module = _g.modules.metering_module
+    while metering_module.is_stop is not True:
+        start_time = time.time()
+        metering_module.update()
+        end_time = time.time()
+        time.sleep(loop_sleep_time - (end_time - start_time))
+
+    pass
 
 def bme280_update_worker(_g):
-    while _g.modules.bme280_module.is_stop is not True:
-        _g.modules.bme280_module.update()
-        print(_g.modules.bme280_module.last_state)
-        time.sleep(0.1)
+    loop_sleep_time = _g.opt.bme280_interval_sec
+    bme280_module = _g.modules.bme280_module
+    while bme280_module.is_stop is not True:
+        start_time = time.time()
+        bme280_module.update()
+        end_time = time.time()
+        time.sleep(loop_sleep_time - (end_time - start_time))
+
 
 def ssd1306_update_worker(_g):
-    i = 0
-    font = ImageFont.load_default()
-    oled = _g.modules.ssd1306_module.display
+    loop_sleep_time = _g.opt.ssd1306_interval_sec
+    ssd1306_module = _g.modules.ssd1306_module
     while _g.modules.ssd1306_module.is_stop is not True:
         start_time = time.time()
-        last_bme280_state = _g.modules.bme280_module.last_state
+        ssd1306_module.update()
+        end_time = time.time()
+        time.sleep(loop_sleep_time - (end_time - start_time))
 
-        image = Image.new('1', (oled.width, oled.height))
-        draw = ImageDraw.Draw(image)
 
-        t = time.localtime()
-        text = '{y:04}/{mo:02}/{d:02} {h:02}:{mi:02}:{s:02}'.format(y=t[0], mo=t[1], d=t[2], h=t[3], mi=t[4], s=t[5])
-        (font_width, font_height) = font.getsize(text)
-        draw.text((oled.width / 2 - font_width / 2, 0), text, font=font, fill=255)
+def init_logger(_g):
+    logger = logging.getLogger(__name__)
+    logger.setLevel(level=logging.INFO)
+    handler = logging.FileHandler(_g.opt.logger_filename)
+    handler.setLevel(logging.WARNING)
+    formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+    handler.setFormatter(formatter)
 
-        text = ' Temperature:  {tm:.3f}'.format(tm=last_bme280_state.temperature)
-        # (font_width, font_height) = font.getsize(text)
-        draw.text((0, 16), text, font=font, fill=255)
+    console = logging.StreamHandler()
+    console.setLevel(logging.INFO)
 
-        text = ' Humidity:     {tm:.3f}'.format(tm=last_bme280_state.humidity)
-        # (font_width, font_height) = font.getsize(text)
-        draw.text((0, 16 + font_height), text, font=font, fill=255)
+    logger.addHandler(handler)
+    logger.addHandler(console)
 
-        text = ' Pressure:   {tm:.3f}'.format(tm=last_bme280_state.pressure)
-        # (font_width, font_height) = font.getsize(text)
-        draw.text((0, 16 + font_height * 2), text, font=font, fill=255)
+    logger.warning('[Main] Logger ready')
 
-        text = ' Altitude:     {tm:.3f}'.format(tm=last_bme280_state.altitude)
-        # (font_width, font_height) = font.getsize(text)
-        draw.text((0, 16 + font_height * 3), text, font=font, fill=255)
-
-        oled.image(image)
-        oled.show()
-
-        rendered_time = time.time()
-
-        time.sleep(1 - (rendered_time - start_time))
-
+    return logger
 
 def main():
     _g = edict()
     parser = argparse.ArgumentParser()
     parser.add_argument('--smbus_port', type=int, default=1)
     parser.add_argument('--bme280_address', type=int, default=0x76)
+    parser.add_argument('--bme280_interval_sec', type=int, default=1)
     parser.add_argument('--pwm_address', type=int, default=0x40)
     parser.add_argument('--ssd1306_address', type=int, default=0x3c)
     parser.add_argument('--ssd1306_width', type=int, default=128)
     parser.add_argument('--ssd1306_height', type=int, default=64)
+    parser.add_argument('--ssd1306_interval_sec', type=int, default=1)
+    parser.add_argument('--logger_filename', type=str, default='log.txt')
+    parser.add_argument('--iot_host', type=str, default='cloud.thingsboard.io')
+    parser.add_argument('--iot_metering_publish_interval_sec', type=int, default=2)
     _g.opt = parser.parse_args()
     _g.is_stop = False
 
+    _g.logger = init_logger(_g)
+
     def exit_signal(signum, frame):
-        print('Finalizing')
+        _g.logger.warning('[Main] Finalizing')
         for module in _g.modules.values():
             module.is_stop = True
         _g.is_stop=True
@@ -82,14 +95,15 @@ def main():
     _g.i2c_bus = busio.I2C(board.SCL, board.SDA)
     # init each modules
     _g.modules = dict()
-    _g.modules.bme280_module = BME280(_g.i2c_bus, _g.opt.bme280_address)
-    _g.modules.ssd1306_module = SSD1306(_g.i2c_bus, _g.opt.ssd1306_address,
-                                        width=_g.opt.ssd1306_width, height=_g.opt.ssd1306_height)
+    _g.modules.bme280_module = BME280(_g, _g.i2c_bus, _g.opt.bme280_address)
+    _g.modules.ssd1306_module = SSD1306(_g, _g.i2c_bus, _g.opt.ssd1306_address, width=_g.opt.ssd1306_width, height=_g.opt.ssd1306_height)
+    _g.modules.metering_module = Metering(_g, _g.opt.iot_host)
 
     # multiple threading for each module
     _g.threads = dict()
     _g.threads.bme280_module_thread = threading.Thread(target=bme280_update_worker, args=(_g,))
     _g.threads.ssd1306_module_thread = threading.Thread(target=ssd1306_update_worker, args=(_g,))
+    _g.threads.metering_module_thread = threading.Thread(target=metering_publish_worker, args=(_g,))
 
     for thread_handle in _g.threads.values():
         thread_handle.start()
