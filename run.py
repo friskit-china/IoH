@@ -97,7 +97,8 @@ def main():
     _g.modules = dict()
     _g.modules.bme280_module = BME280(_g, _g.i2c_bus, _g.opt.bme280_address)
     _g.modules.ssd1306_module = SSD1306(_g, _g.i2c_bus, _g.opt.ssd1306_address, width=_g.opt.ssd1306_width, height=_g.opt.ssd1306_height)
-    _g.modules.metering_module = Metering(_g, _g.opt.iot_host)
+    # _g.modules.metering_module = Metering(_g, _g.opt.iot_host)
+    _g.modules.metering_module = Metering(_g, ioh_host=None) # use environment variable
 
     # multiple threading for each module
     _g.threads = dict()

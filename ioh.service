@@ -1,0 +1,11 @@
+[Unit]
+Description=Internet of Hedgehog
+
+[Service]
+ExecStart=/home/friskit/anaconda/conda_base/bin/python /home/friskit/Projects/IoH/run.py
+EnvironmentFile=/home/friskit/Projects/IoH/ioh.environment
+Restart=always
+WatchdogSec=3600
+
+[Install]
+WantedBy=multi-user.target

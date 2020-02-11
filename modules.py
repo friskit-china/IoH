@@ -84,20 +84,31 @@ class SSD1306:
 
 
 class Metering:
-    def __init__(self, _g, iot_host):
+    def __init__(self, _g, ioh_host=None):
         _g.logger.info('[Metering] Initialization')
         if 'METERING_ACCESS_TOKEN' not in os.environ:
             _g.logger.error('[Metering] Undefined Access Token')
             raise ValueError('Undefined Access Token')
+
+        if 'METERING_DOMAIN' not in os.environ and ioh_host is None:
+            _g.logger.error('[Metering] Undefined Metering Host')
+            raise ValueError('Undefined Undefined Metering Host')
 
         self._g = _g
         self.is_stop = False
         self.client = mqtt.Client()
 
         self.access_token = os.environ['METERING_ACCESS_TOKEN']
-        self.iot_host = iot_host
+        ioh_host = os.environ['METERING_DOMAIN'] if ioh_host is None else ioh_host
+        if ':' in ioh_host:
+            self.ioh_host, self.ioh_port = ioh_host.split(':')
+            self.ioh_port = int(self.ioh_port)
+        else:
+            self.ioh_host, self.ioh_port = ioh_host, 1883 # default port for mqtt proxy
+
         self.client.username_pw_set(self.access_token)
-        self.client.connect(iot_host)
+        _g.logger.info('[Metering] Connecting to {dm}:{pt}'.format(dm=self.ioh_host, pt=self.ioh_port))
+        self.client.connect(self.ioh_host, port=self.ioh_port)
         self.client.loop_start()
 
         self._g.logger.info('[Metering] Ready')
